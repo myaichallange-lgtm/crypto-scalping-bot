@@ -293,8 +293,8 @@ async def run_dashboard():
         for symbol in Config.PAIRS:
             try:
                 ohlcv_1m, ohlcv_5m = await asyncio.gather(
-                    ex.fetch_ohlcv(symbol, "1m", limit=200),
-                    ex.fetch_ohlcv(symbol, "5m", limit=100),
+                    ex.fetch_ohlcv(symbol, "1m", limit=500),
+                    ex.fetch_ohlcv(symbol, "5m", limit=200),
                 )
                 df_1m  = compute_indicators(ohlcv_to_df(ohlcv_1m))
                 df_5m  = compute_indicators(ohlcv_to_df(ohlcv_5m))

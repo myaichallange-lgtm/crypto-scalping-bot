@@ -103,9 +103,10 @@ class TradingEngine:
         """Fetch data, compute signals, and optionally enter a trade."""
         try:
             # Fetch candles for both timeframes concurrently
+            # 500 bars needed for EMA200 + MACD warm-up
             ohlcv_1m, ohlcv_5m = await asyncio.gather(
-                self.exchange.fetch_ohlcv(symbol, Config.ENTRY_TF, limit=200),
-                self.exchange.fetch_ohlcv(symbol, Config.TREND_TF, limit=100),
+                self.exchange.fetch_ohlcv(symbol, Config.ENTRY_TF, limit=500),
+                self.exchange.fetch_ohlcv(symbol, Config.TREND_TF, limit=200),
             )
 
             df_1m = compute_indicators(ohlcv_to_df(ohlcv_1m))
