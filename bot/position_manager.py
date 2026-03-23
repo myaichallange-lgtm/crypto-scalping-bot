@@ -122,7 +122,37 @@ class PositionManager:
             order = await self.exchange.place_market_order(symbol,
                 "buy" if side == "long" else "sell", quantity)
 
-            # Place SL and TP orders
+            # Wait for position to be registered on exchange before placing SL/TP
+            # Retry up to 5 times with 1s delay (handles -4509 TIF GTE error)
+            confirmed = False
+            for attempt in range(5):
+                await asyncio.sleep(1.0)
+                open_pos = await self.exchange.fetch_open_positions()
+                ex_symbol = symbol.replace("/", "")
+                for p in open_pos:
+                    raw_sym = p.get("info", {}).get("symbol", "")
+                    if raw_sym == ex_symbol and float(p.get("contracts", 0)) != 0:
+                        confirmed = True
+                        break
+                if confirmed:
+                    log.debug(f"Position confirmed on exchange after {attempt+1}s")
+                    break
+                log.debug(f"Waiting for position confirmation... attempt {attempt+1}/5")
+
+            if not confirmed:
+                log.warning(f"Position not confirmed on exchange after 5s — skipping SL/TP placement")
+                # Still track it locally, SL/TP will be placed on next monitor cycle
+                pos = Position(
+                    symbol=symbol, side=side, entry_price=entry_price,
+                    quantity=quantity, stop_loss=stop_loss,
+                    take_profit=take_profit, atr=atr, reason=reason,
+                    order_id=order.get("id"),
+                )
+                self.positions[symbol] = pos
+                log.info(f"✅ POSITION TRACKED (no SL/TP yet) | {symbol} {side.upper()} | qty={quantity}")
+                return True
+
+            # Place SL and TP orders now that position is confirmed
             sl_order = await self.exchange.place_stop_order(
                 symbol, "sell" if side == "long" else "buy", quantity, stop_loss
             )
@@ -191,6 +221,27 @@ class PositionManager:
                 closed.append(symbol)
                 log.info(f"Position closed externally: {symbol} (SL/TP hit) after {age_seconds:.0f}s")
                 continue
+
+            # Safety net: ensure SL/TP orders exist — place if missing
+            if pos.sl_order_id is None or pos.tp_order_id is None:
+                try:
+                    open_orders = await self.exchange.exchange.fetch_open_orders(symbol)
+                    has_sl = any(o.get("type") in ("stop_market", "STOP_MARKET") for o in open_orders)
+                    has_tp = any(o.get("type") in ("take_profit_market", "TAKE_PROFIT_MARKET") for o in open_orders)
+                    if not has_sl or not has_tp:
+                        log.warning(f"{symbol}: missing SL/TP orders — placing now")
+                        if not has_sl:
+                            sl_ord = await self.exchange.place_stop_order(
+                                symbol, pos.close_side, pos.quantity, pos.stop_loss
+                            )
+                            pos.sl_order_id = sl_ord.get("id")
+                        if not has_tp:
+                            tp_ord = await self.exchange.place_take_profit_order(
+                                symbol, pos.close_side, pos.quantity, pos.take_profit
+                            )
+                            pos.tp_order_id = tp_ord.get("id")
+                except Exception as e:
+                    log.error(f"Safety net SL/TP placement failed for {symbol}: {e}")
 
             # Trailing stop update
             new_sl = pos.trailing_stop(price)
