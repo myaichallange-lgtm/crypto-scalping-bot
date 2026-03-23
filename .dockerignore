@@ -1,0 +1,20 @@
+# Never bake secrets into the image
+.env
+
+# Git
+.git
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.Python
+
+# Runtime files (mounted as volumes instead)
+logs/
+data/
+
+# Dev tools
+*.md
+dashboard.py

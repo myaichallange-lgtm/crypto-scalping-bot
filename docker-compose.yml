@@ -1,0 +1,42 @@
+version: "3.9"
+
+services:
+  scalping-bot:
+    build: .
+    container_name: scalping-bot
+    restart: unless-stopped          # auto-restarts on crash or server reboot
+
+    ports:
+      - "8765:8765"                  # dashboard → open http://localhost:8765
+
+    environment:
+      # ── Paste your Binance Testnet keys here ──────────────────────────────
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - BINANCE_TESTNET=${BINANCE_TESTNET:-true}
+
+      # ── Bot settings ──────────────────────────────────────────────────────
+      - INITIAL_BALANCE_USDT=${INITIAL_BALANCE_USDT:-100}
+      - MAX_RISK_PER_TRADE=${MAX_RISK_PER_TRADE:-0.02}
+      - DAILY_DRAWDOWN_LIMIT=${DAILY_DRAWDOWN_LIMIT:-0.15}
+      - LEVERAGE=${LEVERAGE:-10}
+      - TRADING_PAIRS=${TRADING_PAIRS:-BTC/USDT,ETH/USDT,SOL/USDT}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    volumes:
+      # Persist logs and trade journal outside the container
+      - ./data:/app/data
+      - ./logs:/app/logs
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
