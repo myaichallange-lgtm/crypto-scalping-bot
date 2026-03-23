@@ -41,6 +41,7 @@ class TradingEngine:
         log.info("=" * 60)
 
         await self.exchange.connect()
+        await self._sync_positions_from_exchange()
         self._running = True
 
         try:
@@ -59,6 +60,44 @@ class TradingEngine:
         log.info(f"Final: {self.risk.summary()}")
         await self.exchange.close()
         log.info("Bot stopped.")
+
+    # ── Startup sync ─────────────────────────────────────────────────────────────
+
+    async def _sync_positions_from_exchange(self):
+        """
+        On startup: fetch any open positions from the exchange and close them.
+        This prevents the bot from opening duplicate positions on top of
+        leftover positions from a previous run.
+        """
+        try:
+            raw = await self.exchange.fetch_open_positions()
+            if not raw:
+                log.info("Startup sync: no open positions on exchange — clean start")
+                return
+            log.warning(f"Startup sync: found {len(raw)} open position(s) from previous run — closing all")
+            for p in raw:
+                ccxt_sym = p.get('info', {}).get('symbol', '')
+                symbol = None
+                for base in ['BTC', 'ETH', 'SOL']:
+                    if ccxt_sym.startswith(base):
+                        symbol = f"{base}/USDT"
+                        break
+                if not symbol:
+                    continue
+                side  = p['side']
+                size  = float(p['contracts'])
+                close = 'sell' if side == 'long' else 'buy'
+                try:
+                    await self.exchange.cancel_all_orders(symbol)
+                    await self.exchange.exchange.create_order(
+                        symbol, 'market', close, size,
+                        params={'reduceOnly': True}
+                    )
+                    log.info(f"Startup sync: closed {symbol} {side} x{size}")
+                except Exception as e:
+                    log.error(f"Startup sync: failed to close {symbol}: {e}")
+        except Exception as e:
+            log.error(f"Startup sync error: {e}")
 
     # ── Main loop ────────────────────────────────────────────────────────────────
 
@@ -124,7 +163,7 @@ class TradingEngine:
 
             # Position sizing
             quantity = self.risk.calculate_position_size(
-                balance, signal.entry_price, signal.stop_loss
+                balance, signal.entry_price, signal.stop_loss, symbol=symbol
             )
             if quantity <= 0:
                 log.warning(f"{symbol}: position size too small, skipping")

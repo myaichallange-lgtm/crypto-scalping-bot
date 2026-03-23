@@ -114,8 +114,12 @@ class PositionManager:
             # Set leverage
             await self.exchange.set_leverage(symbol, Config.LEVERAGE)
 
+            # Cancel any orphaned SL/TP orders — wait for propagation
+            await self.exchange.cancel_all_orders(symbol)
+            await asyncio.sleep(1.0)   # give exchange 1s to process cancels
+
             # Market entry
-            order = await self.exchange.place_market_order(symbol, 
+            order = await self.exchange.place_market_order(symbol,
                 "buy" if side == "long" else "sell", quantity)
 
             # Place SL and TP orders

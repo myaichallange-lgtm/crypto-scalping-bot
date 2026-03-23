@@ -102,6 +102,7 @@ class RiskManager:
         entry_price: float,
         stop_loss: float,
         leverage: int = Config.LEVERAGE,
+        symbol: str = "",
     ) -> float:
         """
         Fixed fractional sizing based on REAL account balance:
@@ -115,34 +116,70 @@ class RiskManager:
 
         Returns quantity in base currency (e.g. BTC, ETH, SOL).
         """
-        risk_amount = balance * Config.MAX_RISK_PER_TRADE   # e.g. $100 × 2% = $2
-        notional    = risk_amount * leverage                 # e.g. $2 × 10 = $20 notional
-        quantity    = notional / entry_price                 # e.g. $20 / $90 = 0.222 SOL
+        risk_amount = balance * Config.MAX_RISK_PER_TRADE   # e.g. $5000 × 2% = $100
+        notional    = risk_amount * leverage                 # e.g. $100 × 10 = $1000 notional
+        quantity    = notional / entry_price
 
         price_risk_pct = abs(entry_price - stop_loss) / entry_price
         if price_risk_pct == 0:
             log.warning("SL equals entry price, skipping")
             return 0.0
-        if price_risk_pct > 0.05:   # SL more than 5% away → reject
+        if price_risk_pct > 0.05:
             log.warning(f"SL too wide: {price_risk_pct:.2%} from entry, skipping")
             return 0.0
 
-        # Hard notional cap: never risk more than $50 notional per trade regardless of balance
-        MAX_NOTIONAL = 50.0
+        # ── Exchange-specific minimums (from Binance Futures testnet) ────────────
+        # BTC: stepSize=0.001, minNotional=$100
+        # ETH: stepSize=0.001, minNotional=$20
+        # SOL: stepSize=0.01,  minNotional=$5
+        MIN_NOTIONAL = {
+            "BTC/USDT": 100.0,
+            "ETH/USDT": 20.0,
+            "SOL/USDT": 5.0,
+        }
+        STEP_SIZE = {
+            "BTC/USDT": 0.001,
+            "ETH/USDT": 0.001,
+            "SOL/USDT": 0.01,
+        }
+
+        # Use passed symbol, fallback to price-range detection
+        if symbol in MIN_NOTIONAL:
+            sym = symbol
+        elif entry_price > 10000:
+            sym = "BTC/USDT"
+        elif entry_price > 500:
+            sym = "ETH/USDT"
+        else:
+            sym = "SOL/USDT"
+
+        min_notional = MIN_NOTIONAL.get(sym, 5.0)
+        step         = STEP_SIZE.get(sym, 0.001)
+
+        # Hard notional cap: max $200 notional per trade (keeps risk sane on $5k testnet)
+        MAX_NOTIONAL = 200.0
         if notional > MAX_NOTIONAL:
             quantity = MAX_NOTIONAL / entry_price
             log.info(f"Notional capped at ${MAX_NOTIONAL} → qty={quantity:.6f}")
 
-        # Minimum notional guard
-        if quantity * entry_price < 5:
-            log.warning(f"Position too small: ${quantity * entry_price:.2f} notional")
+        # Floor: ensure we meet min notional
+        if quantity * entry_price < min_notional:
+            quantity = min_notional / entry_price
+            log.info(f"Quantity raised to meet min notional ${min_notional} → qty={quantity:.6f}")
+
+        # Round to exchange step size
+        quantity = round(int(quantity / step) * step, 6)
+
+        if quantity <= 0:
+            log.warning(f"Quantity rounded to zero for step={step}, skipping")
             return 0.0
 
+        final_notional = quantity * entry_price
         log.info(
-            f"Position size: qty={quantity:.6f} | notional=${quantity * entry_price:.2f} "
-            f"| margin=${quantity * entry_price / leverage:.2f} | SL dist={price_risk_pct:.3%}"
+            f"Position size: qty={quantity} | notional=${final_notional:.2f} "
+            f"| margin=${final_notional / leverage:.2f} | SL dist={price_risk_pct:.3%}"
         )
-        return round(quantity, 6)
+        return quantity
 
     # ── Trade lifecycle ───────────────────────────────────────────────────────────
 
