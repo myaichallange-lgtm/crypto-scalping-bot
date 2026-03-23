@@ -125,13 +125,24 @@ async def api_status(request):
 
         positions = []
         for p in raw_pos:
+            # ccxt maps to unrealizedProfit but Binance raw field is unRealizedProfit
+            unr_pnl = (
+                p.get("unrealizedProfit")
+                or p.get("info", {}).get("unRealizedProfit")
+                or 0
+            )
+            liq = (
+                p.get("liquidationPrice")
+                or p.get("info", {}).get("liquidationPrice")
+                or 0
+            )
             positions.append({
                 "symbol":    p.get("symbol", ""),
                 "side":      p.get("side", ""),
-                "entry":     float(p.get("entryPrice", 0)),
+                "entry":     float(p.get("entryPrice") or p.get("info", {}).get("entryPrice") or 0),
                 "size":      float(p.get("contracts", 0)),
-                "unr_pnl":   float(p.get("unrealizedProfit", 0) or 0),
-                "liq_price": float(p.get("liquidationPrice", 0) or 0),
+                "unr_pnl":   float(unr_pnl),
+                "liq_price": float(liq),
             })
 
         journal = load_journal()

@@ -170,7 +170,7 @@ class PositionManager:
             p["symbol"]: p for p in await self.exchange.fetch_open_positions()
         }
 
-        for symbol, pos in self.positions.items():
+        for symbol, pos in list(self.positions.items()):
             price = current_prices.get(symbol)
             if price is None:
                 continue
@@ -234,18 +234,22 @@ class PositionManager:
         else:
             return (pos.entry_price - exit_price) * pos.quantity * Config.LEVERAGE
 
-    def status_table(self) -> list[dict]:
-        """Returns a list of dicts for pretty-printing."""
+    def status_table(self, current_prices: dict = None) -> list[dict]:
+        """Returns a list of dicts for pretty-printing, with live unrealised P&L."""
         rows = []
         for sym, pos in self.positions.items():
-            rows.append(
-                {
-                    "Symbol": sym,
-                    "Side": pos.side.upper(),
-                    "Entry": pos.entry_price,
-                    "SL": pos.stop_loss,
-                    "TP": pos.take_profit,
-                    "Qty": pos.quantity,
-                }
-            )
+            price = (current_prices or {}).get(sym, pos.entry_price)
+            if pos.side == "long":
+                unr_pnl = (price - pos.entry_price) * pos.quantity * Config.LEVERAGE
+            else:
+                unr_pnl = (pos.entry_price - price) * pos.quantity * Config.LEVERAGE
+            rows.append({
+                "Symbol": sym,
+                "Side":   pos.side.upper(),
+                "Entry":  pos.entry_price,
+                "SL":     pos.stop_loss,
+                "TP":     pos.take_profit,
+                "Qty":    pos.quantity,
+                "UnrPnL": round(unr_pnl, 4),
+            })
         return rows
